@@ -8,7 +8,7 @@ import time
 # Yeni Session ID buraya sabitlendi.
 INSTAGRAM_SESSION_ID = "6059371647%3AxKaA8ghWdqymPy%3A8%3AAYhvCQlBFVxwO3h3ZJpdRxP8Cr-QP4OQ2N4R1u1qug"
 
-st.set_page_config(page_title="Çekiliş Denetimi (Güvenli Mod)", layout="wide")
+st.set_page_config(page_title="Çekiliş Denetimi (Hızlı Mod)", layout="wide")
 
 # --- YARDIMCI FONKSİYONLAR ---
 def get_unique_mentions(text):
@@ -50,8 +50,8 @@ def verify_follow_and_like(username, post_url):
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 # --- ARAYÜZ ---
-st.title("⚖️ Çekiliş Denetimi (Rate Limit Korumalı)")
-st.markdown("Sonuç listesindeki adayların kriter denetimi yapılır. **Instagram engellerine takılmamak için her aday arasında 30 saniye beklenir.**")
+st.title("⚖️ Çekiliş Denetimi")
+st.markdown("Sonuç listesindeki adayların kriter denetimi yapılır. **Sunucu zaman aşımını önlemek için her aday arasında sadece 3 saniye beklenir.**")
 
 with st.sidebar:
     st.header("📁 Gerekli Dokümanlar")
@@ -71,12 +71,15 @@ if u2_file and form_file and comment_file and post_link:
     
     st.subheader("📋 Denetim Raporu")
     
-    # Tahmini süre uyarısı
+    # Tahmini süre uyarısı (3 saniyeye göre güncellendi)
     toplam_aday_tahmini = len(df_u2.dropna(subset=[df_u2.columns[3]]))
-    tahmini_sure_dk = (toplam_aday_tahmini * 30) / 60
-    st.warning(f"⏳ **ÖNEMLİ:** 30 saniyelik bekleme kuralı aktiftir. Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir. Lütfen işlem bitene kadar sekmeyi kapatmayın.")
+    tahmini_sure_dk = (toplam_aday_tahmini * 3) / 60
+    if tahmini_sure_dk < 1:
+        tahmini_sure_dk = 1
+        
+    st.info(f"💡 Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir.")
 
-    if st.button("🚀 Denetlemeyi Başlat (Yavaş ve Güvenli Mod)", use_container_width=True):
+    if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
         
         with st.spinner("Sistem hazırlanıyor..."):
             progress_text = st.empty()
@@ -137,11 +140,10 @@ if u2_file and form_file and comment_file and post_link:
             
             progress_bar.progress((index + 1) / toplam_aday)
             
-            # 30 SANİYE BEKLEME
+            # 3 SANİYE BEKLEME (Streamlit'in çökmesini engeller)
             if index < (toplam_aday - 1):
-                for i in range(30, 0, -1):
-                    timer_text.info(f"⏳ Instagram engeline takılmamak için bekleniyor: Bir sonraki adaya **{i} saniye** kaldı...")
-                    time.sleep(1)
+                timer_text.info("⏳ Kontrol ediliyor...")
+                time.sleep(3)
                 timer_text.empty() 
         
         progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
@@ -166,5 +168,4 @@ if u2_file and form_file and comment_file and post_link:
             st.download_button("✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", data=csv_clean, file_name="Temiz_Kazananlar_Listesi.csv", mime="text/csv", use_container_width=True)
 
 else:
-    # Bilgilendirme metni güncellendi
     st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
