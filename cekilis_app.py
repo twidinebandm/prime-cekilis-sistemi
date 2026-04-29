@@ -21,8 +21,9 @@ def get_unique_mentions(text):
 
 def verify_follow_and_like(username, post_url):
     """
-    Kullanıcının profiline gidip Takip (Follow Back) kontrolü yapar.
-    Ayrıca post linki üzerinden beğeni durumunu denetler.
+    Kullanıcının profiline gidip Takip durumunu kontrol eder.
+    Follow Back / Sen de Takip et varsa -> Olumlu ✅
+    Follow / Takip et varsa -> Olumsuz 🚫
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -34,17 +35,22 @@ def verify_follow_and_like(username, post_url):
         response = requests.get(url, headers=headers, timeout=8)
         
         if response.status_code == 404:
-            return "❌ Hesap Yok", "❌ Hesap Yok"
+            return "Olumsuz 🚫 (Hesap Yok)", "Olumsuz 🚫"
             
         content = response.text
         
-        # 1. Takip Kontrolü (Follow Back)
-        follow_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et"]
-        is_following = any(indicator in content for indicator in follow_indicators)
-        takip_durumu = "✅ Ediyor" if is_following else "❌ Etmiyor (Manuel Bak)"
+        # 1. Takip Kontrolü (Önce olumlu kelimeleri arıyoruz çünkü "Sen de Takip Et" içinde "Takip Et" geçiyor)
+        positive_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et", "Sen de Onu Takip Et"]
+        
+        is_following = any(indicator in content for indicator in positive_indicators)
+        
+        if is_following:
+            takip_durumu = "Olumlu ✅"
+        else:
+            takip_durumu = "Olumsuz 🚫"
         
         # 2. Beğeni Kontrolü 
-        begeni_durumu = "✅ Beğenmiş" if post_url else "⚠️ Link Girilmedi"
+        begeni_durumu = "Olumlu ✅" if post_url else "⚠️ Link Girilmedi"
         
         return takip_durumu, begeni_durumu
     except:
@@ -65,7 +71,6 @@ with st.sidebar:
     post_link = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
 
 # --- KONTROL VE BUTON MANTIĞI ---
-# Sadece tüm dosyalar ve link yüklendiğinde işlem alanını göster
 if u2_file and form_file and comment_file and post_link:
     # Verileri Oku
     df_u2 = pd.read_excel(u2_file, header=0) 
@@ -77,37 +82,38 @@ if u2_file and form_file and comment_file and post_link:
     # Denetlemeyi Başlat Butonu
     if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
         
-        # Butonun hemen altında ilerleme çubuğu ve bilgi metni oluştur
-        progress_text = st.empty()
-        progress_bar = st.progress(0)
-        
-        denetim_rows = []
-        
-        # Formdaki kullanıcı adlarını (C sütunu - index 2) temiz bir listeye al
-        form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
-        
-        toplam_aday = len(df_u2)
-        
-        # U2 Listesindeki her talihli için döngü (D sütunu - index 3)
+        # UX: Bekleme Sürecini Yöneten Kısım (Spinner)
+        with st.spinner("Dosyalar inceleniyor ve denetim altyapısı hazırlanıyor... Lütfen bekleyin."):
+            
+            # İşlem alanlarını oluştur
+            progress_text = st.empty()
+            progress_bar = st.progress(0)
+            denetim_rows = []
+            
+            # Formdaki kullanıcı adlarını (C sütunu - index 2) temiz bir listeye al
+            form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
+            toplam_aday = len(df_u2)
+            
+        # Spinner bittikten sonra asıl denetim başlar
         for index, row in df_u2.iterrows():
             u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "BOŞ SATIR"
             
-            if u2_user == "BOŞ SATIR" or u2_user == "nan":
-                # Boş satırlarda ilerlemeyi yine de güncelle
+            # GEREKSİZ VERİLERİ (Başlık, NaN veya boş satır) EXCLUDE ET
+            ignore_list = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
+            if u2_user in ignore_list:
                 progress_bar.progress((index + 1) / toplam_aday)
                 continue 
                 
             hediye_tipi = str(row.iloc[0]) 
             
-            # Durum Güncellemesi (Kullanıcıya o an kimin denetlendiğini gösterir)
+            # Durum Güncellemesi
             progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user} ...")
             
             # 1. FORM KONTROLÜ
             form_durumu = "✅ Var" if u2_user in form_users else "❌ Yok / Uyuşmuyor"
             
-            # 2. 3 ETİKET KONTROLÜ (Sociality'den bul)
+            # 2. 3 ETİKET KONTROLÜ
             user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
-            
             etiket_durumu = "❌ Yorum Yok"
             if not user_comm.empty:
                 mentions = get_unique_mentions(user_comm.iloc[0, 4])
@@ -120,7 +126,7 @@ if u2_file and form_file and comment_file and post_link:
             takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
             
             # 4. GENEL DURUM
-            if "❌" in form_durumu or "❌" in etiket_durumu or "❌" in takip_durumu or "❌" in begeni_durumu:
+            if "❌" in form_durumu or "❌" in etiket_durumu or "Olumsuz 🚫" in takip_durumu or "Olumsuz 🚫" in begeni_durumu:
                 son_karar = "ELENDİ: Şartlar Sağlanmadı"
             elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
                 son_karar = "MANUEL KONTROL GEREKLİ"
@@ -143,7 +149,7 @@ if u2_file and form_file and comment_file and post_link:
             progress_bar.progress((index + 1) / toplam_aday)
             time.sleep(0.1) 
         
-        # İşlem bittiğinde metni temizle/değiştir
+        # İşlem bittiğinde metni başarı mesajına çevir
         progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
         
         # Sonuçları Göster
@@ -165,5 +171,4 @@ if u2_file and form_file and comment_file and post_link:
             mime="text/csv"
         )
 else:
-    # Eksik dosya/link varsa verilecek uyarı
     st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin.")
