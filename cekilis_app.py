@@ -19,10 +19,7 @@ def get_unique_mentions(text):
     return list(set(mentions)) 
 
 def verify_follow_and_like(username, post_url):
-    """
-    Kullanıcının profiline gidip durumu kontrol eder.
-    Anonim sorgularda 'Follow Back' görünmeyeceği için haksız elemeyi engeller.
-    """
+    """Instagram üzerinden takip/beğeni durumunu inceler."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
@@ -31,33 +28,26 @@ def verify_follow_and_like(username, post_url):
     
     try:
         response = requests.get(url, headers=headers, timeout=8)
-        
-        # Eğer sayfa 404 ise hesap gerçekten yoktur veya dondurulmuştur.
         if response.status_code == 404:
             return "Olumsuz 🚫 (Hesap Yok)", "Olumsuz 🚫"
             
         content = response.text
-        
-        # Olumlu kelime havuzu
         positive_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et", "Sen de Onu Takip Et"]
         
         if any(indicator in content for indicator in positive_indicators):
             takip_durumu = "Olumlu ✅"
         else:
-            # Instagram anonim girişlerde login ekranı veya standart "Follow" gösterir.
-            # Haksız yere elememek için durumu manuel kontrole bırakıyoruz.
+            # Anonim girişte 'Follow Back' gizlendiği için haksız elemeyi engelliyoruz
             takip_durumu = "⚠️ Manuel Kontrol"
         
-        # Beğeni Kontrolü 
         begeni_durumu = "Olumlu ✅" if post_url else "⚠️ Link Girilmedi"
-        
         return takip_durumu, begeni_durumu
     except:
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 # --- ARAYÜZ ---
 st.title("⚖️ Çekiliş Denetimi")
-st.markdown("Sonuç listesindeki adayların **Form Kaydı**, **Takip**, **3 Etiket** ve **Beğeni** kontrolleri yapılmaktadır.")
+st.markdown("Sonuç listesindeki adayların kriter denetimi yapılır ve **temiz kazanan listesi** oluşturulur.")
 
 with st.sidebar:
     st.header("📁 Gerekli Dokümanlar")
@@ -78,7 +68,6 @@ if u2_file and form_file and comment_file and post_link:
     
     st.subheader("📋 Denetim Raporu")
     
-    # Denetlemeyi Başlat Butonu
     if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
         
         with st.spinner("Dosyalar inceleniyor ve veriler eşleştiriliyor... Lütfen bekleyin."):
@@ -90,14 +79,11 @@ if u2_file and form_file and comment_file and post_link:
             form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
             toplam_aday = len(df_u2)
             
-        # Spinner sonrası asıl döngü
         for index, row in df_u2.iterrows():
-            # Kullanıcı adı ve Durum (Asil/Yedek) bilgilerini al
             hediye_tipi = str(row.iloc[0]).strip()
             u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "nan"
             
-            # GEREKSİZ VERİLERİ EXCLUDE ET
-            # Hem Durum sütunundaki "nan" vb. hem de Kullanıcı adındaki gereksiz başlıkları eliyoruz
+            # GEREKSİZ VERİLERİ (Başlıklar, Boş Satırlar) EXCLUDE ET
             ignore_users = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
             ignore_durum = ["nan", "boş satır", "", "none"]
             
@@ -105,7 +91,6 @@ if u2_file and form_file and comment_file and post_link:
                 progress_bar.progress((index + 1) / toplam_aday)
                 continue 
             
-            # Ekranda o an kimin denetlendiğini göster
             progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user} ...")
             
             # 1. FORM KONTROLÜ
@@ -132,7 +117,6 @@ if u2_file and form_file and comment_file and post_link:
             else:
                 son_karar = "GEÇERLİ"
                 
-            # Tabloya Ekle
             denetim_rows.append({
                 "Durum": hediye_tipi,
                 "Kullanıcı Adı": u2_user,
@@ -145,28 +129,49 @@ if u2_file and form_file and comment_file and post_link:
             })
             
             progress_bar.progress((index + 1) / toplam_aday)
-            time.sleep(0.1) 
+            time.sleep(0.05) 
         
-        # Bitiş Mesajı
         progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
         
-        # Tabloyu Bastır
         result_df = pd.DataFrame(denetim_rows)
+        
+        # --- ELENENLERİN ÇIKARILDIĞI TEMİZ LİSTE (CRITICAL UPDATE) ---
+        temiz_df = result_df[result_df['SON KARAR'] != "ELENDİ: Şartlar Sağlanmadı"].copy()
+        
+        # Tablo Görünümü (Tüm Liste)
         st.dataframe(
             result_df, 
-            column_config={
-                "Profil Linki": st.column_config.LinkColumn("Profil Linki")
-            },
+            column_config={"Profil Linki": st.column_config.LinkColumn("Profil Linki")},
             use_container_width=True
         )
         
-        # İndirme Butonu
-        csv = result_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 Denetim Raporunu İndir (CSV)", 
-            data=csv, 
-            file_name="Cekilis_Denetim_Raporu.csv",
-            mime="text/csv"
-        )
+        # İNDİRME ALANI
+        st.divider()
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Tüm Liste (Hataları görmek için)
+            csv_all = result_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 Tüm Denetim Raporunu İndir", 
+                data=csv_all, 
+                file_name="Tam_Denetim_Raporu.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+        with col2:
+            # Temiz Liste (Sadece kazananlar ve manuel kontroller)
+            csv_clean = temiz_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", 
+                data=csv_clean, 
+                file_name="Temiz_Kazananlar_Listesi.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        st.caption(f"Denetim bitti. Toplam {len(result_df)} aday incelendi. {len(temiz_df)} aday kriterleri sağladı/manuel kontrole kaldı.")
+
 else:
     st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
