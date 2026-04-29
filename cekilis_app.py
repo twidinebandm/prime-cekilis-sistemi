@@ -12,7 +12,7 @@ except:
     st.error("Hata: ACCESS_TOKEN bulunamadı! Lütfen Streamlit Secrets ayarlarına ekleyin.")
     st.stop()
 
-st.set_page_config(page_title="Turk Telekom Prime Çekiliş Merkezi", layout="wide")
+st.set_page_config(page_title="Prime Çekiliş Merkezi", layout="wide")
 
 # --- FONKSİYONLAR ---
 
@@ -51,7 +51,7 @@ def fast_pre_filter(row, prev_winners):
     return "ÖN ELEME TAMAM", True
 
 # --- ARAYÜZ ---
-st.title("🏆 Turk Telekom Prime Çekiliş Paneli")
+st.title("🏆 Prime Çekiliş Paneli")
 st.markdown("---")
 
 with st.sidebar:
