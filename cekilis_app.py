@@ -2,142 +2,91 @@ import streamlit as st
 import pandas as pd
 import re
 import requests
-import time
 
-# --- GÜVENLİK AYARLARI (Streamlit Secrets üzerinden) ---
-# Streamlit Cloud'da Settings > Secrets kısmına ACCESS_TOKEN = "..." olarak eklenmelidir.
+# --- GÜVENLİK ---
 try:
     ACCESS_TOKEN = st.secrets["ACCESS_TOKEN"]
 except:
-    st.error("Hata: ACCESS_TOKEN bulunamadı! Lütfen Streamlit Secrets ayarlarına ekleyin.")
     st.stop()
 
-st.set_page_config(page_title="Prime Çekiliş Merkezi", layout="wide")
+st.set_page_config(page_title="Prime - Denetim Paneli", layout="wide")
 
-# --- FONKSİYONLAR ---
+# --- YARDIMCI FONKSİYONLAR ---
+def get_mentions(text):
+    if pd.isna(text): return []
+    return list(set(re.findall(r'@([\w\.]+)', str(text).lower())))
 
-def check_instagram_status(username):
-    """Kullanıcının profilinin aktif olup olmadığını kontrol eder."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-    }
+def verify_active_profile(username):
+    headers = {"User-Agent": "Mozilla/5.0"}
     url = f"https://www.instagram.com/{username}/"
     try:
-        response = requests.get(url, headers=headers, timeout=8)
-        if response.status_code == 200:
-            return True, "✅ Profil Aktif"
-        return False, "❌ Profil Bulunamadı (404)"
+        r = requests.get(url, headers=headers, timeout=5)
+        return "✅ Aktif" if r.status_code == 200 else "❌ Pasif/404"
     except:
-        return True, "⚠️ Bağlantı Sınırı (Manuel Kontrol)"
-
-def fast_pre_filter(row, prev_winners):
-    """Dosya üzerinden hızlı ön eleme (Etiket ve Eski Kazanan)."""
-    user = str(row['Username']).lower().strip()
-    msg = str(row['Message'])
-    
-    # 1. Eski Kazanan Kontrolü
-    if user in prev_winners:
-        return "ELENDİ: Eski Kazanan", False
-    
-    # 2. Etiket Kontrolü (En az 3 farklı kişi)
-    mentions = re.findall(r'@([\w\.]+)', msg.lower())
-    unique_mentions = set(mentions)
-    
-    if len(unique_mentions) < 3:
-        return "ELENDİ: Yetersiz Etiket", False
-    if len(mentions) != len(unique_mentions):
-        return "ELENDİ: Tekrarlı Etiket", False
-        
-    return "ÖN ELEME TAMAM", True
+        return "⚠️ Kontrol Edilemedi"
 
 # --- ARAYÜZ ---
-st.title("🏆 Prime Çekiliş Paneli")
-st.markdown("---")
+st.title("⚖️ Çekiliş Denetim Sistemi")
 
 with st.sidebar:
-    st.header("🎯 Çekiliş Parametreleri")
-    asil_s = st.number_input("Asil Sayısı", min_value=1, step=1, value=2)
-    yedek_s = st.number_input("Yedek Sayısı", min_value=0, step=1, value=2)
+    st.header("📁 Gerekli Dokümanlar")
+    u2_file = st.file_uploader("1. U2 Sonuç Listesi (SONUÇLAR...)", type=['xlsx'])
+    form_file = st.file_uploader("2. Başvuru Formu (Yanıtlar...)", type=['xlsx'])
+    comment_file = st.file_uploader("3. Sociality Yorum Listesi", type=['xlsx'])
+    post_url = st.text_input("Beğeni Kontrolü İçin Post Linki")
+
+if u2_file and form_file and comment_file:
+    # Verileri Oku
+    df_u2 = pd.read_excel(u2_file, header=0) # D sütunu kullanıcı adı
+    df_form = pd.read_excel(form_file) # C sütunu kullanıcı adı
+    df_comm = pd.read_excel(comment_file) # C sütunu kullanıcı adı
+
+    st.subheader("📋 U2 Listesi Denetim Raporu")
     
-    st.divider()
-    st.header("🔗 Gönderi Linki")
-    post_url = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
-    
-    st.divider()
-    st.header("📁 Veri Kaynakları")
-    comment_files = st.file_uploader("Yorum Dosyalarını Seçin", accept_multiple_files=True)
-    past_file = st.file_uploader("Eski Kazananlar (kazananlar.xlsx)")
-
-if comment_files:
-    # 1. Dosyaları birleştir ve aynı kullanıcıyı 1 kez say
-    all_data = []
-    for f in comment_files:
-        try:
-            temp = pd.read_csv(f) if f.name.endswith('.csv') else pd.read_excel(f)
-            all_data.append(temp)
-        except:
-            st.error(f"Dosya okunamadı: {f.name}")
-    
-    if all_data:
-        df = pd.concat(all_data, ignore_index=True)
-        # Sadece Username ve Message sütunlarını temizle
-        df = df.drop_duplicates(subset=['Username']).copy()
+    denetim_rows = []
+    # U2 Listesindeki her talihli için döngü (D sütunu = df_u2.columns[3])
+    for index, row in df_u2.iterrows():
+        u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "BELİRTİLMEMİŞ"
+        hediye_tipi = str(row.iloc[0]) # A sütunu hediye/asil-yedek bilgisi
         
-        # 2. Eski kazananları yükle
-        prev_list = []
-        if past_file:
-            try:
-                df_p = pd.read_csv(past_file) if past_file.name.endswith('.csv') else pd.read_excel(past_file)
-                # İkinci sütundan kullanıcı adını ayıkla
-                prev_list = df_p.iloc[:, 1].str.extract(r'@([\w\.]+)')[0].str.lower().dropna().tolist()
-            except:
-                st.warning("Eski kazananlar dosyası işlenemedi.")
-
-        # 3. ÖN ELEME AŞAMASI
-        st.subheader("🏁 Aşama 1: Kriter Ön Elemesi")
-        analysis = df.apply(lambda r: fast_pre_filter(r, prev_list), axis=1)
-        df['Durum_Metni'] = [x[0] for x in analysis]
-        df['Gecerli_Mi'] = [x[1] for x in analysis]
+        # 1. FORM KONTROLÜ (Tam Eşleşme)
+        # Formda C sütunu = df_form.columns[2]
+        form_match = df_form[df_form.iloc[:, 2].str.lower().str.strip() == u2_user]
+        has_form = not form_match.empty
         
-        # Sadece ön elemeyi geçenleri göster
-        st.dataframe(df[df['Gecerli_Mi'] == True][['Username', 'Durum_Metni']], use_container_width=True)
-        
-        potansiyel = df[df['Gecerli_Mi'] == True]
-        st.success(f"Ön elemeyi geçen {len(potansiyel)} aday bulundu.")
+        # 2. YORUM VE ETİKET KONTROLÜ
+        # Sociality C sütunu = df_comm.columns[2], E sütunu = df_comm.columns[4]
+        user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
+        has_3_mentions = False
+        if not user_comm.empty:
+            mentions = get_mentions(user_comm.iloc[0, 4])
+            if len(mentions) >= 3:
+                has_3_mentions = True
 
-        # 4. KESİN DOĞRULAMA VE ÇEKİLİŞ
-        if st.button("🚀 ÇEKİLİŞİ BAŞLAT (Profil ve Takip Onayı)"):
-            with st.spinner("Profiller doğrulanıyor, lütfen bekleyin..."):
-                final_pool = []
-                prog_bar = st.progress(0)
-                
-                for i, (idx, row) in enumerate(potansiyel.iterrows()):
-                    is_active, _ = check_instagram_status(row['Username'])
-                    if is_active:
-                        final_pool.append(row['Username'])
-                    prog_bar.progress((i + 1) / len(potansiyel))
-                    time.sleep(0.05) # Rate limit koruması
+        # 3. DURUM BELİRLEME
+        if u2_user == "BELİRTİLMEMİŞ":
+            final_status = "BOŞ SATIR"
+        elif not has_form:
+            final_status = "ELENDİ: Başvuru Formu Kaydı Yok / Hatalı Yazım"
+        elif not has_3_mentions:
+            final_status = "ELENDİ: Yorumda 3 Etiket Şartı Sağlanmadı"
+        else:
+            final_status = "GEÇERLİ"
 
-                if len(final_pool) >= (asil_s + yedek_s):
-                    winners = pd.Series(final_pool).sample(n=asil_s + yedek_s).tolist()
-                    st.balloons()
-                    
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.success(f"🌟 {asil_s} ASİL KAZANAN")
-                        for a in winners[:asil_s]:
-                            col_user, col_link = st.columns([3, 2])
-                            col_user.write(f"**@{a}**")
-                            col_link.markdown(f"[🔗 Profili Aç](https://instagram.com/{a}/)")
-                    
-                    with c2:
-                        st.warning(f"⏳ {yedek_s} YEDEK KAZANAN")
-                        for y in winners[asil_s:]:
-                            col_user, col_link = st.columns([3, 2])
-                            col_user.write(f"**@{y}**")
-                            col_link.markdown(f"[🔗 Profili Aç](https://instagram.com/{y}/)")
-                    
-                    st.markdown("---")
-                    st.info("💡 **İpucu:** 'Profili Aç' linkiyle kazananın Follow Back (Geri Takip) durumunu manuel teyit etmeniz %100 doğruluk için önerilir.")
-                else:
-                    st.error(f"Yeterli aday yok! (Filtreleri geçen: {len(final_pool)})")
+        denetim_rows.append({
+            "Hediye/Durum": hediye_tipi,
+            "Kullanıcı Adı (U2)": u2_user,
+            "Form Kaydı": "✅ Var" if has_form else "❌ Yok",
+            "3 Etiket": "✅ Tamam" if has_3_mentions else "❌ Eksik",
+            "DENETİM SONUCU": final_status
+        })
+
+    result_df = pd.DataFrame(denetim_rows)
+    st.dataframe(result_df, use_container_width=True)
+
+    # Raporu İndir
+    csv = result_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Denetim Raporunu Excel Olarak İndir", data=csv, file_name="MPI_Denetim_Raporu.csv")
+
+else:
+    st.warning("Lütfen denetimi başlatmak için tüm dosyaları yükleyin.")
