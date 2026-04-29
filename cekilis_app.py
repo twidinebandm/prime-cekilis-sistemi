@@ -5,8 +5,8 @@ import requests
 import time
 
 # --- GÜVENLİK VE OTURUM AYARLARI ---
-# Verdiğin Session ID buraya sabitlendi. Sistem artık otomatik olarak bunu kullanacak.
-INSTAGRAM_SESSION_ID = "192295478%3AjzBzsgeIuBnZRM%3A2%3AAYgk0-bOG7qKMlt1LzIxBmiXm8jWtiVHiykg1u31ln0N"
+# Yeni Session ID buraya sabitlendi.
+INSTAGRAM_SESSION_ID = "6059371647%3AxKaA8ghWdqymPy%3A8%3AAYhvCQlBFVxwO3h3ZJpdRxP8Cr-QP4OQ2N4R1u1qug"
 
 st.set_page_config(page_title="Çekiliş Denetimi (Güvenli Mod)", layout="wide")
 
@@ -18,15 +18,13 @@ def get_unique_mentions(text):
 
 def verify_follow_and_like(username, post_url):
     """
-    Koda gömülü Session ID'yi kullanarak Instagram'a 'giriş yapmış' gibi bağlanır.
-    Böylece gizli profilleri veya Follow Back durumlarını net görebilir.
+    Sabitlenen Session ID'yi kullanarak Instagram'a 'giriş yapmış' gibi bağlanır.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
-    # Sabitlenmiş Session ID'yi çerez (cookie) olarak isteğe ekliyoruz
     cookies = {"sessionid": INSTAGRAM_SESSION_ID}
     url = f"https://www.instagram.com/{username}/"
     
@@ -38,8 +36,7 @@ def verify_follow_and_like(username, post_url):
             
         content = response.text
         
-        # Giriş yapıldığında Instagram'ın HTML yapısında "Seni Takip Ediyor",
-        # "Follow Back" veya "Follows you" gibi ibareler görünür.
+        # Takip kontrolü için olumlu ibareler
         positive_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et", "Sen de Onu Takip Et", "Seni takip ediyor", "Follows you"]
         
         if any(indicator in content for indicator in positive_indicators):
@@ -74,8 +71,7 @@ if u2_file and form_file and comment_file and post_link:
     
     st.subheader("📋 Denetim Raporu")
     
-    # KULLANICIYA SÜRE UYARISI VER
-    # 'Durum' sütununda geçerli veri olanları sayıyoruz (boş satırları hesaba katmamak için)
+    # Tahmini süre uyarısı
     toplam_aday_tahmini = len(df_u2.dropna(subset=[df_u2.columns[3]]))
     tahmini_sure_dk = (toplam_aday_tahmini * 30) / 60
     st.warning(f"⏳ **ÖNEMLİ:** 30 saniyelik bekleme kuralı aktiftir. Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir. Lütfen işlem bitene kadar sekmeyi kapatmayın.")
@@ -85,7 +81,7 @@ if u2_file and form_file and comment_file and post_link:
         with st.spinner("Sistem hazırlanıyor..."):
             progress_text = st.empty()
             progress_bar = st.progress(0)
-            timer_text = st.empty() # Bekleme süresini gösterecek alan
+            timer_text = st.empty() 
             denetim_rows = []
             
             form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
@@ -117,7 +113,7 @@ if u2_file and form_file and comment_file and post_link:
                 else:
                     etiket_durumu = f"Olumsuz 🚫 ({len(mentions)} Etiket)"
                     
-            # 3. TAKİP VE BEĞENİ KONTROLÜ (Otomatik Session ID ile)
+            # 3. TAKİP VE BEĞENİ KONTROLÜ
             takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
             
             # 4. GENEL DURUM
@@ -141,13 +137,12 @@ if u2_file and form_file and comment_file and post_link:
             
             progress_bar.progress((index + 1) / toplam_aday)
             
-            # 30 SANİYE BEKLEME (Rate Limit Koruması)
-            # Son aday değilse bekleme yap
+            # 30 SANİYE BEKLEME
             if index < (toplam_aday - 1):
                 for i in range(30, 0, -1):
                     timer_text.info(f"⏳ Instagram engeline takılmamak için bekleniyor: Bir sonraki adaya **{i} saniye** kaldı...")
                     time.sleep(1)
-                timer_text.empty() # Süre bitince yazıyı temizle
+                timer_text.empty() 
         
         progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
         
@@ -171,4 +166,5 @@ if u2_file and form_file and comment_file and post_link:
             st.download_button("✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", data=csv_clean, file_name="Temiz_Kazananlar_Listesi.csv", mime="text/csv", use_container_width=True)
 
 else:
+    # Bilgilendirme metni güncellendi
     st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
