@@ -6,9 +6,9 @@ import time
 
 # --- GÜVENLİK VE OTURUM AYARLARI ---
 # Yeni Session ID buraya sabitlendi.
-INSTAGRAM_SESSION_ID = "6059371647%3AxKaA8ghWdqymPy%3A8%3AAYhvCQlBFVxwO3h3ZJpdRxP8Cr-QP4OQ2N4R1u1qug"
+INSTAGRAM_SESSION_ID = "192295478%3AjzBzsgeIuBnZRM%3A2%3AAYh8VySB7nBet-2nviwjm5wIhLGzfpY4NjAOL7u2nPPe"
 
-st.set_page_config(page_title="Çekiliş Denetimi (Hızlı Mod)", layout="wide")
+st.set_page_config(page_title="Çekiliş Denetimi", layout="wide")
 
 # --- YARDIMCI FONKSİYONLAR ---
 def get_unique_mentions(text):
@@ -17,9 +17,6 @@ def get_unique_mentions(text):
     return list(set(mentions)) 
 
 def verify_follow_and_like(username, post_url):
-    """
-    Sabitlenen Session ID'yi kullanarak Instagram'a 'giriş yapmış' gibi bağlanır.
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
@@ -35,8 +32,6 @@ def verify_follow_and_like(username, post_url):
             return "Olumsuz 🚫 (Hesap Yok)", "Olumsuz 🚫"
             
         content = response.text
-        
-        # Takip kontrolü için olumlu ibareler
         positive_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et", "Sen de Onu Takip Et", "Seni takip ediyor", "Follows you"]
         
         if any(indicator in content for indicator in positive_indicators):
@@ -71,15 +66,12 @@ if u2_file and form_file and comment_file and post_link:
     
     st.subheader("📋 Denetim Raporu")
     
-    # Tahmini süre uyarısı (3 saniyeye göre güncellendi)
     toplam_aday_tahmini = len(df_u2.dropna(subset=[df_u2.columns[3]]))
-    tahmini_sure_dk = (toplam_aday_tahmini * 3) / 60
-    if tahmini_sure_dk < 1:
-        tahmini_sure_dk = 1
+    tahmini_sure_dk = max(1, (toplam_aday_tahmini * 3) / 60)
         
     st.info(f"💡 Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir.")
 
-    if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
+    if st.button("🚀 Denetlemeyi Başlat"):
         
         with st.spinner("Sistem hazırlanıyor..."):
             progress_text = st.empty()
@@ -103,10 +95,8 @@ if u2_file and form_file and comment_file and post_link:
             
             progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user} ...")
             
-            # 1. FORM KONTROLÜ
             form_durumu = "Olumlu ✅" if u2_user in form_users else "Olumsuz 🚫 (Yok / Uyuşmuyor)"
             
-            # 2. 3 ETİKET KONTROLÜ
             user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
             etiket_durumu = "Olumsuz 🚫 (Yorum Yok)"
             if not user_comm.empty:
@@ -116,10 +106,8 @@ if u2_file and form_file and comment_file and post_link:
                 else:
                     etiket_durumu = f"Olumsuz 🚫 ({len(mentions)} Etiket)"
                     
-            # 3. TAKİP VE BEĞENİ KONTROLÜ
             takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
             
-            # 4. GENEL DURUM
             if "Olumsuz 🚫" in form_durumu or "Olumsuz 🚫" in etiket_durumu or "Olumsuz 🚫" in takip_durumu or "Olumsuz 🚫" in begeni_durumu:
                 son_karar = "ELENDİ: Şartlar Sağlanmadı"
             elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
@@ -140,7 +128,6 @@ if u2_file and form_file and comment_file and post_link:
             
             progress_bar.progress((index + 1) / toplam_aday)
             
-            # 3 SANİYE BEKLEME (Streamlit'in çökmesini engeller)
             if index < (toplam_aday - 1):
                 timer_text.info("⏳ Kontrol ediliyor...")
                 time.sleep(3)
@@ -153,19 +140,18 @@ if u2_file and form_file and comment_file and post_link:
         
         st.dataframe(
             result_df, 
-            column_config={"Profil Linki": st.column_config.LinkColumn("Profil Linki")},
-            use_container_width=True
+            column_config={"Profil Linki": st.column_config.LinkColumn("Profil Linki")}
         )
         
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
             csv_all = result_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Tüm Denetim Raporunu İndir", data=csv_all, file_name="Tam_Denetim_Raporu.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Tüm Denetim Raporunu İndir", data=csv_all, file_name="Tam_Denetim_Raporu.csv", mime="text/csv")
             
         with col2:
             csv_clean = temiz_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", data=csv_clean, file_name="Temiz_Kazananlar_Listesi.csv", mime="text/csv", use_container_width=True)
+            st.download_button("✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", data=csv_clean, file_name="Temiz_Kazananlar_Listesi.csv", mime="text/csv")
 
 else:
     st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
