@@ -64,7 +64,9 @@ with st.sidebar:
     st.header("🔗 Etkileşim Kontrolü")
     post_link = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
 
-if u2_file and form_file and comment_file:
+# --- KONTROL VE BUTON MANTIĞI ---
+# Sadece tüm dosyalar ve link yüklendiğinde işlem alanını göster
+if u2_file and form_file and comment_file and post_link:
     # Verileri Oku
     df_u2 = pd.read_excel(u2_file, header=0) 
     df_form = pd.read_excel(form_file)
@@ -72,81 +74,96 @@ if u2_file and form_file and comment_file:
     
     st.subheader("📋 Denetim Raporu")
     
-    if st.button("🚀 Denetimi Başlat"):
-        if not post_link:
-            st.warning("Lütfen beğeni kontrolü için Post Linkini girin.")
-        else:
-            with st.spinner("Adaylar denetleniyor, lütfen bekleyin..."):
-                denetim_rows = []
-                progress = st.progress(0)
+    # Denetlemeyi Başlat Butonu
+    if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
+        
+        # Butonun hemen altında ilerleme çubuğu ve bilgi metni oluştur
+        progress_text = st.empty()
+        progress_bar = st.progress(0)
+        
+        denetim_rows = []
+        
+        # Formdaki kullanıcı adlarını (C sütunu - index 2) temiz bir listeye al
+        form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
+        
+        toplam_aday = len(df_u2)
+        
+        # U2 Listesindeki her talihli için döngü (D sütunu - index 3)
+        for index, row in df_u2.iterrows():
+            u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "BOŞ SATIR"
+            
+            if u2_user == "BOŞ SATIR" or u2_user == "nan":
+                # Boş satırlarda ilerlemeyi yine de güncelle
+                progress_bar.progress((index + 1) / toplam_aday)
+                continue 
                 
-                # Formdaki kullanıcı adlarını (C sütunu - index 2) temiz bir listeye al
-                form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
+            hediye_tipi = str(row.iloc[0]) 
+            
+            # Durum Güncellemesi (Kullanıcıya o an kimin denetlendiğini gösterir)
+            progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user} ...")
+            
+            # 1. FORM KONTROLÜ
+            form_durumu = "✅ Var" if u2_user in form_users else "❌ Yok / Uyuşmuyor"
+            
+            # 2. 3 ETİKET KONTROLÜ (Sociality'den bul)
+            user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
+            
+            etiket_durumu = "❌ Yorum Yok"
+            if not user_comm.empty:
+                mentions = get_unique_mentions(user_comm.iloc[0, 4])
+                if len(mentions) >= 3:
+                    etiket_durumu = f"✅ Tamam ({len(mentions)} Etiket)"
+                else:
+                    etiket_durumu = f"❌ Yetersiz ({len(mentions)} Etiket)"
+                    
+            # 3. TAKİP VE BEĞENİ KONTROLÜ
+            takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
+            
+            # 4. GENEL DURUM
+            if "❌" in form_durumu or "❌" in etiket_durumu or "❌" in takip_durumu or "❌" in begeni_durumu:
+                son_karar = "ELENDİ: Şartlar Sağlanmadı"
+            elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
+                son_karar = "MANUEL KONTROL GEREKLİ"
+            else:
+                son_karar = "GEÇERLİ"
                 
-                # U2 Listesindeki her talihli için döngü (D sütunu - index 3)
-                for index, row in df_u2.iterrows():
-                    u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "BOŞ SATIR"
-                    
-                    if u2_user == "BOŞ SATIR" or u2_user == "nan":
-                        continue 
-                        
-                    hediye_tipi = str(row.iloc[0]) 
-                    
-                    # 1. FORM KONTROLÜ
-                    form_durumu = "✅ Var" if u2_user in form_users else "❌ Yok / Uyuşmuyor"
-                    
-                    # 2. 3 ETİKET KONTROLÜ (Sociality'den bul)
-                    user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
-                    
-                    etiket_durumu = "❌ Yorum Yok"
-                    if not user_comm.empty:
-                        mentions = get_unique_mentions(user_comm.iloc[0, 4])
-                        if len(mentions) >= 3:
-                            etiket_durumu = f"✅ Tamam ({len(mentions)} Etiket)"
-                        else:
-                            etiket_durumu = f"❌ Yetersiz ({len(mentions)} Etiket)"
-                            
-                    # 3. TAKİP VE BEĞENİ KONTROLÜ
-                    takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
-                    
-                    # 4. GENEL DURUM
-                    if "❌" in form_durumu or "❌" in etiket_durumu or "❌" in takip_durumu or "❌" in begeni_durumu:
-                        son_karar = "ELENDİ: Şartlar Sağlanmadı"
-                    elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
-                        son_karar = "MANUEL KONTROL GEREKLİ"
-                    else:
-                        son_karar = "GEÇERLİ"
-                        
-                    # Tabloya Ekle
-                    denetim_rows.append({
-                        "Durum": hediye_tipi,
-                        "Kullanıcı Adı": u2_user,
-                        "Form Kaydı?": form_durumu,
-                        "3 Etiket?": etiket_durumu,
-                        "Takip Ediyor mu?": takip_durumu,
-                        "Beğenmiş mi?": begeni_durumu,
-                        "SON KARAR": son_karar,
-                        "Profil Linki": f"https://instagram.com/{u2_user}/"
-                    })
-                    
-                    progress.progress((index + 1) / len(df_u2))
-                    time.sleep(0.1) 
-                
-                # Sonuçları Göster
-                result_df = pd.DataFrame(denetim_rows)
-                st.dataframe(
-                    result_df, 
-                    column_config={
-                        "Profil Linki": st.column_config.LinkColumn("Profil Linki")
-                    },
-                    use_container_width=True
-                )
-                
-                # Excel/CSV İndirme Butonu
-                csv = result_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 Denetim Raporunu İndir (CSV)", 
-                    data=csv, 
-                    file_name="Cekilis_Denetim_Raporu.csv",
-                    mime="text/csv"
-                )
+            # Tabloya Ekle
+            denetim_rows.append({
+                "Durum": hediye_tipi,
+                "Kullanıcı Adı": u2_user,
+                "Form Kaydı?": form_durumu,
+                "3 Etiket?": etiket_durumu,
+                "Takip Ediyor mu?": takip_durumu,
+                "Beğenmiş mi?": begeni_durumu,
+                "SON KARAR": son_karar,
+                "Profil Linki": f"https://instagram.com/{u2_user}/"
+            })
+            
+            # Çubuğu ilerlet
+            progress_bar.progress((index + 1) / toplam_aday)
+            time.sleep(0.1) 
+        
+        # İşlem bittiğinde metni temizle/değiştir
+        progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
+        
+        # Sonuçları Göster
+        result_df = pd.DataFrame(denetim_rows)
+        st.dataframe(
+            result_df, 
+            column_config={
+                "Profil Linki": st.column_config.LinkColumn("Profil Linki")
+            },
+            use_container_width=True
+        )
+        
+        # Excel/CSV İndirme Butonu
+        csv = result_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 Denetim Raporunu İndir (CSV)", 
+            data=csv, 
+            file_name="Cekilis_Denetim_Raporu.csv",
+            mime="text/csv"
+        )
+else:
+    # Eksik dosya/link varsa verilecek uyarı
+    st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin.")
