@@ -14,19 +14,17 @@ st.set_page_config(page_title="Çekiliş Denetimi", layout="wide")
 
 # --- YARDIMCI FONKSİYONLAR ---
 def get_unique_mentions(text):
-    """Metin içindeki @etiketleri bulur ve benzersiz olanları sayar."""
     if pd.isna(text): return []
     mentions = re.findall(r'@([\w\.]+)', str(text).lower())
     return list(set(mentions)) 
 
 def verify_follow_and_like(username, post_url):
     """
-    Kullanıcının profiline gidip Takip durumunu kontrol eder.
-    Follow Back / Sen de Takip et varsa -> Olumlu ✅
-    Follow / Takip et varsa -> Olumsuz 🚫
+    Kullanıcının profiline gidip durumu kontrol eder.
+    Anonim sorgularda 'Follow Back' görünmeyeceği için haksız elemeyi engeller.
     """
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     url = f"https://www.instagram.com/{username}/"
@@ -34,22 +32,23 @@ def verify_follow_and_like(username, post_url):
     try:
         response = requests.get(url, headers=headers, timeout=8)
         
+        # Eğer sayfa 404 ise hesap gerçekten yoktur veya dondurulmuştur.
         if response.status_code == 404:
             return "Olumsuz 🚫 (Hesap Yok)", "Olumsuz 🚫"
             
         content = response.text
         
-        # 1. Takip Kontrolü (Önce olumlu kelimeleri arıyoruz çünkü "Sen de Takip Et" içinde "Takip Et" geçiyor)
+        # Olumlu kelime havuzu
         positive_indicators = ["Follow Back", "Geri Takip Et", "Sen de Takip Et", "Sen de Onu Takip Et"]
         
-        is_following = any(indicator in content for indicator in positive_indicators)
-        
-        if is_following:
+        if any(indicator in content for indicator in positive_indicators):
             takip_durumu = "Olumlu ✅"
         else:
-            takip_durumu = "Olumsuz 🚫"
+            # Instagram anonim girişlerde login ekranı veya standart "Follow" gösterir.
+            # Haksız yere elememek için durumu manuel kontrole bırakıyoruz.
+            takip_durumu = "⚠️ Manuel Kontrol"
         
-        # 2. Beğeni Kontrolü 
+        # Beğeni Kontrolü 
         begeni_durumu = "Olumlu ✅" if post_url else "⚠️ Link Girilmedi"
         
         return takip_durumu, begeni_durumu
@@ -82,51 +81,51 @@ if u2_file and form_file and comment_file and post_link:
     # Denetlemeyi Başlat Butonu
     if st.button("🚀 Denetlemeyi Başlat", use_container_width=True):
         
-        # UX: Bekleme Sürecini Yöneten Kısım (Spinner)
-        with st.spinner("Dosyalar inceleniyor ve denetim altyapısı hazırlanıyor... Lütfen bekleyin."):
-            
-            # İşlem alanlarını oluştur
+        with st.spinner("Dosyalar inceleniyor ve veriler eşleştiriliyor... Lütfen bekleyin."):
             progress_text = st.empty()
             progress_bar = st.progress(0)
             denetim_rows = []
             
-            # Formdaki kullanıcı adlarını (C sütunu - index 2) temiz bir listeye al
+            # Formdaki kullanıcı adlarını temiz bir listeye al
             form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
             toplam_aday = len(df_u2)
             
-        # Spinner bittikten sonra asıl denetim başlar
+        # Spinner sonrası asıl döngü
         for index, row in df_u2.iterrows():
-            u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "BOŞ SATIR"
+            # Kullanıcı adı ve Durum (Asil/Yedek) bilgilerini al
+            hediye_tipi = str(row.iloc[0]).strip()
+            u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "nan"
             
-            # GEREKSİZ VERİLERİ (Başlık, NaN veya boş satır) EXCLUDE ET
-            ignore_list = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
-            if u2_user in ignore_list:
+            # GEREKSİZ VERİLERİ EXCLUDE ET
+            # Hem Durum sütunundaki "nan" vb. hem de Kullanıcı adındaki gereksiz başlıkları eliyoruz
+            ignore_users = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
+            ignore_durum = ["nan", "boş satır", "", "none"]
+            
+            if u2_user in ignore_users or hediye_tipi.lower() in ignore_durum:
                 progress_bar.progress((index + 1) / toplam_aday)
                 continue 
-                
-            hediye_tipi = str(row.iloc[0]) 
             
-            # Durum Güncellemesi
+            # Ekranda o an kimin denetlendiğini göster
             progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user} ...")
             
             # 1. FORM KONTROLÜ
-            form_durumu = "✅ Var" if u2_user in form_users else "❌ Yok / Uyuşmuyor"
+            form_durumu = "Olumlu ✅" if u2_user in form_users else "Olumsuz 🚫 (Yok / Uyuşmuyor)"
             
             # 2. 3 ETİKET KONTROLÜ
             user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
-            etiket_durumu = "❌ Yorum Yok"
+            etiket_durumu = "Olumsuz 🚫 (Yorum Yok)"
             if not user_comm.empty:
                 mentions = get_unique_mentions(user_comm.iloc[0, 4])
                 if len(mentions) >= 3:
-                    etiket_durumu = f"✅ Tamam ({len(mentions)} Etiket)"
+                    etiket_durumu = f"Olumlu ✅ ({len(mentions)} Etiket)"
                 else:
-                    etiket_durumu = f"❌ Yetersiz ({len(mentions)} Etiket)"
+                    etiket_durumu = f"Olumsuz 🚫 ({len(mentions)} Etiket)"
                     
             # 3. TAKİP VE BEĞENİ KONTROLÜ
             takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
             
             # 4. GENEL DURUM
-            if "❌" in form_durumu or "❌" in etiket_durumu or "Olumsuz 🚫" in takip_durumu or "Olumsuz 🚫" in begeni_durumu:
+            if "Olumsuz 🚫" in form_durumu or "Olumsuz 🚫" in etiket_durumu or "Olumsuz 🚫" in takip_durumu or "Olumsuz 🚫" in begeni_durumu:
                 son_karar = "ELENDİ: Şartlar Sağlanmadı"
             elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
                 son_karar = "MANUEL KONTROL GEREKLİ"
@@ -145,14 +144,13 @@ if u2_file and form_file and comment_file and post_link:
                 "Profil Linki": f"https://instagram.com/{u2_user}/"
             })
             
-            # Çubuğu ilerlet
             progress_bar.progress((index + 1) / toplam_aday)
             time.sleep(0.1) 
         
-        # İşlem bittiğinde metni başarı mesajına çevir
+        # Bitiş Mesajı
         progress_text.success("✅ Tüm adayların denetimi başarıyla tamamlandı!")
         
-        # Sonuçları Göster
+        # Tabloyu Bastır
         result_df = pd.DataFrame(denetim_rows)
         st.dataframe(
             result_df, 
@@ -162,7 +160,7 @@ if u2_file and form_file and comment_file and post_link:
             use_container_width=True
         )
         
-        # Excel/CSV İndirme Butonu
+        # İndirme Butonu
         csv = result_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Denetim Raporunu İndir (CSV)", 
@@ -171,4 +169,4 @@ if u2_file and form_file and comment_file and post_link:
             mime="text/csv"
         )
 else:
-    st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin.")
+    st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
