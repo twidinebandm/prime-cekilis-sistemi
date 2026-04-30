@@ -5,7 +5,6 @@ import requests
 import time
 
 # --- GÜVENLİK VE OTURUM AYARLARI ---
-# Yeni Session ID buraya sabitlendi.
 INSTAGRAM_SESSION_ID = "192295478%3AjzBzsgeIuBnZRM%3A2%3AAYh8VySB7nBet-2nviwjm5wIhLGzfpY4NjAOL7u2nPPe"
 
 st.set_page_config(page_title="Çekiliş Denetimi", layout="wide")
@@ -44,35 +43,76 @@ def verify_follow_and_like(username, post_url):
     except:
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
-# --- ARAYÜZ ---
+# --- ARAYÜZ (ADIM ADIM YAPI) ---
 st.title("⚖️ Çekiliş Denetimi")
 st.markdown("Sonuç listesindeki adayların kriter denetimi yapılır. **Sunucu zaman aşımını önlemek için her aday arasında sadece 3 saniye beklenir.**")
 
 with st.sidebar:
-    st.header("📁 Gerekli Dokümanlar")
-    u2_file = st.file_uploader("Sonuç Listesi", type=['xlsx'])
-    form_file = st.file_uploader("Başvuru Formu", type=['xlsx'])
-    comment_file = st.file_uploader("Yorum Listesi", type=['xlsx'])
-    
+    st.title("Adım Adım Kurulum")
     st.divider()
-    st.header("🔗 Etkileşim Kontrolü")
-    post_link = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
+    
+    # Değişkenleri başta boş olarak tanımlıyoruz
+    form_file = None
+    comment_file = None
+    post_link = ""
+    
+    # 1. ADIM
+    st.header("1️⃣ Sonuç Listesi")
+    u2_file = st.file_uploader("U2 Ajansından gelen listeyi yükleyin", type=['xlsx'])
+    
+    if u2_file:
+        st.success("✅ Sonuç Listesi Yüklendi")
+        st.divider()
+        
+        # 2. ADIM (Sadece 1. adım tamamsa görünür)
+        st.header("2️⃣ Başvuru Formu")
+        form_file = st.file_uploader("Form yanıtlarını yükleyin", type=['xlsx'])
+        
+        if form_file:
+            st.success("✅ Başvuru Formu Yüklendi")
+            st.divider()
+            
+            # 3. ADIM (Sadece 2. adım tamamsa görünür)
+            st.header("3️⃣ Yorum Listesi")
+            comment_file = st.file_uploader("Sociality raporunu yükleyin", type=['xlsx'])
+            
+            if comment_file:
+                st.success("✅ Yorum Listesi Yüklendi")
+                st.divider()
+                
+                # 4. ADIM (Sadece 3. adım tamamsa görünür)
+                st.header("4️⃣ Etkileşim Kontrolü")
+                post_link = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
+                if post_link:
+                    st.success("✅ Link Eklendi")
 
 # --- KONTROL VE BUTON MANTIĞI ---
-if u2_file and form_file and comment_file and post_link:
+# Ana ekrandaki uyarı mesajlarını adımlara göre dinamikleştiriyoruz
+if not u2_file:
+    st.info("💡 Başlamak için lütfen sol menüden **1. Adım: Sonuç Listesi** dosyasını yükleyin.")
+elif not form_file:
+    st.info("💡 Harika! Şimdi **2. Adım: Başvuru Formu** dosyasını yükleyebilirsiniz.")
+elif not comment_file:
+    st.info("💡 Çok az kaldı. Lütfen **3. Adım: Yorum Listesi** dosyasını yükleyin.")
+elif not post_link:
+    st.info("💡 Son adım: Lütfen beğeni kontrolü için **Post Linkini** sol menüye yapıştırıp klavyeden 'Enter' tuşuna basın.")
+else:
+    # Tüm adımlar tamamlandığında bu blok çalışır
     df_u2 = pd.read_excel(u2_file, header=0) 
     df_form = pd.read_excel(form_file)
     df_comm = pd.read_excel(comment_file)
     
-    st.subheader("📋 Denetim Raporu")
+    st.subheader("📋 Denetim Öncesi Hazırlık")
     
     toplam_aday_tahmini = len(df_u2.dropna(subset=[df_u2.columns[3]]))
     tahmini_sure_dk = max(1, (toplam_aday_tahmini * 3) / 60)
         
-    st.info(f"💡 Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir.")
+    st.success(f"Tüm belgeler hazır! Listede yaklaşık {toplam_aday_tahmini} aday var. Bu işlem yaklaşık **{int(tahmini_sure_dk)} dakika** sürecektir.")
 
-    if st.button("🚀 Denetlemeyi Başlat"):
+    # "Bilgileri Gönder" butonu (Tüm adımlar bitince çıkar)
+    if st.button("🚀 Bilgileri Gönder (Denetimi Başlat)", type="primary"):
         
+        st.divider()
         with st.spinner("Sistem hazırlanıyor..."):
             progress_text = st.empty()
             progress_bar = st.progress(0)
@@ -152,6 +192,3 @@ if u2_file and form_file and comment_file and post_link:
         with col2:
             csv_clean = temiz_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("✅ SADECE KAZANANLAR LİSTESİNİ İNDİR (Temiz)", data=csv_clean, file_name="Temiz_Kazananlar_Listesi.csv", mime="text/csv")
-
-else:
-    st.info("💡 Denetleme işlemini başlatabilmek için lütfen sol menüden **Tüm Dokümanları** yükleyin ve **Post Linkini** girin ve bekleyin...")
