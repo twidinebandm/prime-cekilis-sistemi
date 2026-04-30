@@ -42,49 +42,60 @@ def verify_follow_and_like(username, post_url):
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 def fetch_comments_via_api(post_link):
-    """Meta Token ile doğru Business ID'yi kendi bulup yorumları çeker."""
+    """Meta Token ile doğru Business ID'yi bulur, linki temizler ve yorumları çeker."""
     try:
-        ig_account_id = None
+        # 1. Akıllı Link Temizleyici (URL'nin sonundaki ?igsh= vb. çöpleri atar)
+        match = re.search(r'/(?:p|reel|tv)/([^/?#&]+)', post_link)
+        if not match:
+            return None, "Geçersiz Instagram linki formatı. Lütfen kopyaladığınız linki kontrol edin."
+        shortcode = match.group(1)
         
-        # 1. Otomatik Business Account ID Tespiti
-        # Önce Sayfa Token'ı olma ihtimalini dener
+        # 2. Token'a bağlı TÜM Instagram Business kimliklerini tespit et
+        ig_accounts = []
+        accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account&access_token={META_ACCESS_TOKEN}"
+        acc_res = requests.get(accounts_url).json()
+        
+        if 'data' in acc_res:
+            for page in acc_res['data']:
+                if 'instagram_business_account' in page:
+                    ig_accounts.append(page['instagram_business_account']['id'])
+                    
         me_url = f"https://graph.facebook.com/v19.0/me?fields=instagram_business_account&access_token={META_ACCESS_TOKEN}"
         me_res = requests.get(me_url).json()
-        
         if 'instagram_business_account' in me_res:
-            ig_account_id = me_res['instagram_business_account']['id']
-        else:
-            # Kullanıcı Token'ı ise bağlı sayfaları tarar
-            accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account&access_token={META_ACCESS_TOKEN}"
-            acc_res = requests.get(accounts_url).json()
+            ig_accounts.append(me_res['instagram_business_account']['id'])
             
-            if 'data' in acc_res:
-                for page in acc_res['data']:
-                    if 'instagram_business_account' in page:
-                        ig_account_id = page['instagram_business_account']['id']
+        # Benzersiz ID'leri al
+        ig_accounts = list(set(ig_accounts))
+        
+        if not ig_accounts:
+            return None, "Token'a bağlı gizli Instagram Business kimliği bulunamadı. Lütfen Facebook izinlerini kontrol edin."
+
+        target_media_id = None
+        
+        # 3. Bulunan TÜM hesaplarda bu gönderiyi DERİNLEMESİNE (sayfalayarak) ara
+        for ig_account_id in ig_accounts:
+            media_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media?fields=shortcode,id&limit=50&access_token={META_ACCESS_TOKEN}"
+            
+            while media_url and not target_media_id:
+                media_response = requests.get(media_url).json()
+                
+                if 'error' in media_response:
+                    break # Bu hesapta hata verdiyse diğer bağlı hesaba geç
+                    
+                for item in media_response.get('data', []):
+                    if item.get('shortcode') == shortcode:
+                        target_media_id = item.get('id')
                         break
                         
-        if not ig_account_id:
-            return None, "Token'a bağlı gizli Instagram Business kimliği bulunamadı. İzinleri kontrol edin."
-
-        # 2. Post Linkinden Shortcode'u ayıkla
-        shortcode = list(filter(None, post_link.split('/')))[-1]
-        
-        # 3. Bulunan Kimlik ile Medya ID'sini tespit et
-        media_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media?fields=shortcode,id&access_token={META_ACCESS_TOKEN}"
-        media_response = requests.get(media_url).json()
-        
-        if 'error' in media_response:
-            return None, f"Medya Hatası: {media_response['error']['message']}"
-            
-        target_media_id = None
-        for item in media_response.get('data', []):
-            if item.get('shortcode') == shortcode:
-                target_media_id = item.get('id')
-                break
+                # Bir sonraki sayfaya geç (eski gönderiler için)
+                media_url = media_response.get('paging', {}).get('next', None)
+                
+            if target_media_id:
+                break # Gönderiyi bulduk, diğer hesaplara bakmaya gerek yok
                 
         if not target_media_id:
-            return None, "Gönderi API üzerinde bulunamadı. Lütfen Linkin doğruluğunu kontrol edin."
+            return None, f"Gönderi API üzerinde bulunamadı. Link doğruysa, Token bu gönderinin bulunduğu hesaba erişemiyor olabilir."
             
         # 4. Tüm yorumları sayfa sayfa (pagination) çek
         comments_url = f"https://graph.facebook.com/v19.0/{target_media_id}/comments?fields=username,text&limit=100&access_token={META_ACCESS_TOKEN}"
@@ -159,7 +170,7 @@ else:
             st.error(f"❌ Yorumlar çekilemedi! Hata Detayı: {api_status}")
             st.stop()
         else:
-            st.info(f"✅ {len(df_comm)} adet yorum başarıyla analiz edildi.")
+            st.info(f"✅ Gönderi bulundu! {len(df_comm)} adet yorum başarıyla analiz edildi.")
             
         progress_text = st.empty()
         progress_bar = st.progress(0)
