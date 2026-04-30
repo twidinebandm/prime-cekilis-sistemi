@@ -3,12 +3,13 @@ import pandas as pd
 import re
 import requests
 import time
+import io  # Excel dönüşümü için gerekli
 
 # --- OTOMATİZE EDİLMİŞ TEKNİK BİLGİLER ---
 # Takip/Beğeni kontrolü için kullanılan Session ID
 INSTAGRAM_SESSION_ID = "192295478%3AjzBzsgeIuBnZRM%3A2%3AAYh8VySB7nBet-2nviwjm5wIhLGzfpY4NjAOL7u2nPPe"
 
-st.set_page_config(page_title="Çekiliş Denetimi (Dosya Modu)", layout="wide")
+st.set_page_config(page_title="Çekiliş Denetimi", layout="wide")
 
 # --- YARDIMCI FONKSİYONLAR ---
 def get_unique_mentions(text):
@@ -41,8 +42,8 @@ def verify_follow_and_like(username, post_url):
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 # --- ARAYÜZ (ADIM ADIM YAPI) ---
-st.title("⚖️ Çekiliş Denetimi (Dosya & Session Modu)")
-st.markdown("Yorumlar ve Etiketler yüklenen **Sociality Raporu** üzerinden, Takip/Beğeni ise **Session ID** üzerinden denetlenir.")
+st.title("⚖️ Çekiliş Denetimi")
+st.markdown("Veriler yüklendikten sonra denetim başlar ve sonuçlar **Excel** olarak indirilebilir.")
 
 with st.sidebar:
     st.title("İşlem Adımları")
@@ -68,9 +69,8 @@ with st.sidebar:
             st.success("✅ Başvuru Formu Yüklendi")
             st.divider()
             
-            # 3. ADIM (YENİDEN EKLENDİ)
+            # 3. ADIM
             st.header("3️⃣ Yorum Listesi")
-            st.caption("my-brand-conversation-activities... adlı dosyayı yükleyin.")
             comment_file = st.file_uploader("Sociality Yorum Raporunu Yükleyin", type=['xlsx'])
             
             if comment_file:
@@ -89,20 +89,18 @@ if not u2_file:
 elif not form_file:
     st.info("💡 Şimdi **2. Adım: Başvuru Formu** dosyasını yükleyebilirsiniz.")
 elif not comment_file:
-    st.info("💡 Yorum denetimi için **3. Adım: Yorum Listesi (Sociality Raporu)** dosyasını yükleyin.")
+    st.info("💡 Yorum denetimi için **3. Adım: Yorum Listesi** dosyasını yükleyin.")
 elif not post_link:
-    st.info("💡 Son olarak beğeni kontrolü yapılacak **Post Linkini** girin ve klavyeden 'Enter' tuşuna basın.")
+    st.info("💡 Son adım: Beğeni kontrolü yapılacak **Post Linkini** girin.")
 else:
-    # Tüm dosyalar yüklendiyse verileri oku
     df_u2 = pd.read_excel(u2_file, header=0) 
     df_form = pd.read_excel(form_file)
     df_comm = pd.read_excel(comment_file)
     
     st.subheader("📋 Denetim Öncesi Hazırlık")
     toplam_aday_tahmini = len(df_u2.dropna(subset=[df_u2.columns[3]]))
-    tahmini_sure_dk = max(1, (toplam_aday_tahmini * 3) / 60)
         
-    st.success(f"Tüm belgeler hazır! Listede {toplam_aday_tahmini} aday var. Tahmini süre: **{int(tahmini_sure_dk)} dakika**.")
+    st.success(f"Tüm belgeler hazır! Listede {toplam_aday_tahmini} aday var.")
 
     if st.button("🚀 Bilgileri Gönder (Denetimi Başlat)", type="primary"):
         st.divider()
@@ -112,7 +110,6 @@ else:
         timer_text = st.empty() 
         denetim_rows = []
         
-        # Formdaki kullanıcı adları
         form_users = df_form.iloc[:, 2].dropna().astype(str).str.lower().str.strip().tolist()
         toplam_aday = len(df_u2)
             
@@ -120,11 +117,8 @@ else:
             hediye_tipi = str(row.iloc[0]).strip()
             u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "nan"
             
-            # Gereksiz satırları atla
             ignore_users = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
-            ignore_durum = ["nan", "boş satır", "", "none"]
-            
-            if u2_user in ignore_users or hediye_tipi.lower() in ignore_durum:
+            if u2_user in ignore_users or hediye_tipi.lower() in ["nan", "boş satır", ""]:
                 progress_bar.progress((index + 1) / toplam_aday)
                 continue 
             
@@ -133,12 +127,11 @@ else:
             # 1. FORM KONTROLÜ
             form_durumu = "Olumlu ✅" if u2_user in form_users else "Olumsuz 🚫 (Yok / Uyuşmuyor)"
             
-            # 2. 3 ETİKET VE YORUM KONTROLÜ (Sociality Excel'inden)
+            # 2. 3 ETİKET VE YORUM KONTROLÜ
             user_comm = df_comm[df_comm.iloc[:, 2].str.lower().str.strip() == u2_user]
             etiket_durumu = "Olumsuz 🚫 (Yorum Yok)"
             
             if not user_comm.empty:
-                # 4. indexte (E sütunu) yorum metni olduğunu varsayıyoruz
                 mentions = get_unique_mentions(user_comm.iloc[0, 4])
                 if len(mentions) >= 3:
                     etiket_durumu = f"Olumlu ✅ ({len(mentions)} Etiket)"
@@ -168,24 +161,35 @@ else:
             })
             
             progress_bar.progress((index + 1) / toplam_aday)
-            
             if index < (toplam_aday - 1):
-                timer_text.info("⏳ Instagram bekleme kuralı (3 sn)...")
-                time.sleep(3)
-                timer_text.empty() 
+                time.sleep(3) 
         
         progress_text.success("✅ Denetim tamamlandı!")
         
         result_df = pd.DataFrame(denetim_rows)
         temiz_df = result_df[result_df['SON KARAR'] != "ELENDİ: Şartlar Sağlanmadı"].copy()
         
-        st.dataframe(result_df, column_config={"Profil Linki": st.column_config.LinkColumn("Profil Linki")})
+        st.dataframe(result_df)
         
         st.divider()
         col1, col2 = st.columns(2)
+        
+        # --- EXCEL DÖNÜŞÜM İŞLEMİ ---
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            temiz_df.to_excel(writer, index=False, sheet_name='Temiz Liste')
+        buffer.seek(0)
+        # ----------------------------
+
         with col1:
             csv_all = result_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Tüm Raporu İndir", data=csv_all, file_name="Tam_Rapor.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Tüm Raporu İndir (CSV)", data=csv_all, file_name="Tam_Rapor.csv", mime="text/csv")
+        
         with col2:
-            csv_clean = temiz_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("✅ TEMİZ LİSTEYİ İNDİR", data=csv_clean, file_name="Temiz_Liste.csv", mime="text/csv", use_container_width=True)
+            # Excel İndirme Butonu
+            st.download_button(
+                label="✅ TEMİZ LİSTEYİ İNDİR (XLSX)",
+                data=buffer,
+                file_name="Temiz_Kazananlar_Listesi.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
