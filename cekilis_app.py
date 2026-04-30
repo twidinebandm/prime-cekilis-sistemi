@@ -19,7 +19,6 @@ def get_unique_mentions(text):
     return list(set(mentions)) 
 
 def verify_follow_and_like(username, post_url):
-    """Session ID ile Takip ve Beğeni kontrolü yapar."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept-Language": "tr-TR,tr;q=0.9"
@@ -42,35 +41,40 @@ def verify_follow_and_like(username, post_url):
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 def fetch_comments_via_api(post_link):
-    """Meta Token ile doğru Business ID'yi bulur, derin tarama yapar ve yorumları çeker."""
     try:
-        # 1. Linki Temizle
         match = re.search(r'/(?:p|reel|tv)/([^/?#&]+)', post_link)
         if not match:
             return None, "Geçersiz Link Formatı."
         shortcode = match.group(1)
         
-        # 2. Bağlı Tüm Business Hesaplarını Bul
         ig_accounts = []
+        account_usernames = [] # Debugging için hesap isimlerini tutacağımız liste
+        
         acc_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account,name&access_token={META_ACCESS_TOKEN}"
         acc_res = requests.get(acc_url).json()
         
         if 'data' in acc_res:
             for page in acc_res['data']:
                 if 'instagram_business_account' in page:
-                    ig_accounts.append(page['instagram_business_account']['id'])
+                    ig_id = page['instagram_business_account']['id']
+                    ig_accounts.append(ig_id)
+                    
+                    # Token'ın görebildiği IG hesaplarının kullanıcı adlarını alalım
+                    ig_info_url = f"https://graph.facebook.com/v19.0/{ig_id}?fields=username&access_token={META_ACCESS_TOKEN}"
+                    ig_info_res = requests.get(ig_info_url).json()
+                    if 'username' in ig_info_res:
+                        account_usernames.append(ig_info_res['username'])
         
         if not ig_accounts:
-            return None, "Token'a bağlı hiçbir Instagram Business hesabı bulunamadı. Lütfen Meta Developer panelinden yetkileri kontrol edin."
+            return None, "Token'a bağlı hiçbir Instagram Business hesabı bulunamadı. Lütfen Meta Developer panelinden Token yetkilerini kontrol edin."
 
         target_media_id = None
         
-        # 3. ULTRA DERİN TARAMA: Her hesapta 100'erli paketler halinde gönderiyi ara (Limit artırıldı)
         for ig_account_id in ig_accounts:
             media_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media?fields=shortcode,id&limit=100&access_token={META_ACCESS_TOKEN}"
             
             page_count = 0
-            while media_url and not target_media_id and page_count < 100: # Son 10.000 postu tarar (Eski/Sabitlenmiş gönderiler için)
+            while media_url and not target_media_id and page_count < 100: 
                 m_res = requests.get(media_url).json()
                 if 'data' in m_res:
                     for item in m_res['data']:
@@ -81,9 +85,9 @@ def fetch_comments_via_api(post_link):
                 page_count += 1
                 
         if not target_media_id:
-            return None, f"Gönderi ({shortcode}) API'de bulunamadı. Lütfen Token'ın turktelekomprime hesabına erişim izni olduğundan emin olun."
+            seen_accounts = ", ".join(account_usernames) if account_usernames else "Bilinmeyen Hesap(lar)"
+            return None, f"Gönderi ({shortcode}) API'de bulunamadı.\n\n👀 **Sistemin Şu An Görebildiği Hesaplar:** {seen_accounts}\n\n👉 Eğer 'turktelekomprime' bu listede yoksa Token alırken sayfayı seçmemişsiniz demektir. Listede varsa gönderi bir Ortak (Collab) paylaşımıdır."
 
-        # 4. Yorumları Çek
         all_comments = []
         comments_url = f"https://graph.facebook.com/v19.0/{target_media_id}/comments?fields=username,text&limit=100&access_token={META_ACCESS_TOKEN}"
         
@@ -147,12 +151,11 @@ else:
     if st.button("🚀 Bilgileri Gönder (Denetimi Başlat)", type="primary"):
         st.divider()
         
-        # Güncellenmiş Bekleme Yazısı
-        with st.spinner("Gönderi Meta API'de aranıyor ve yorumlar indiriliyor (Eski/Sabitlenmiş gönderiler için işlem 1-2 dakika sürebilir)..."):
+        with st.spinner("Meta Graph API bağlantısı kuruluyor ve yorumlar toplanıyor..."):
             df_comm, api_status = fetch_comments_via_api(post_link)
             
         if df_comm is None:
-            st.error(f"❌ Yorumlar çekilemedi! Hata Detayı: {api_status}")
+            st.error(f"❌ Yorumlar çekilemedi! Hata Detayı:\n\n{api_status}")
             st.stop()
         else:
             st.info(f"✅ Gönderi başarıyla bulundu! {len(df_comm)} adet yorum sisteme aktarıldı.")
@@ -178,10 +181,8 @@ else:
             
             progress_text.text(f"Denetleniyor ({index + 1}/{toplam_aday}): @{u2_user}")
             
-            # 1. FORM KONTROLÜ
             form_durumu = "Olumlu ✅" if u2_user in form_users else "Olumsuz 🚫 (Yok / Uyuşmuyor)"
             
-            # 2. 3 ETİKET KONTROLÜ
             etiket_durumu = "Olumsuz 🚫 (Yorum Yok)"
             if not df_comm.empty and 'username' in df_comm.columns:
                 user_comm = df_comm[df_comm['username'].str.lower().str.strip() == u2_user]
@@ -197,10 +198,8 @@ else:
                     else:
                         etiket_durumu = f"Olumsuz 🚫 ({max_mentions} Etiket)"
                         
-            # 3. TAKİP VE BEĞENİ KONTROLÜ
             takip_durumu, begeni_durumu = verify_follow_and_like(u2_user, post_link)
             
-            # 4. GENEL KARAR
             if "Olumsuz 🚫" in form_durumu or "Olumsuz 🚫" in etiket_durumu or "Olumsuz 🚫" in takip_durumu or "Olumsuz 🚫" in begeni_durumu:
                 son_karar = "ELENDİ: Şartlar Sağlanmadı"
             elif "⚠️" in takip_durumu or "⚠️" in begeni_durumu:
@@ -237,7 +236,7 @@ else:
         col1, col2 = st.columns(2)
         with col1:
             csv_all = result_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Tüm Raporu İndir", data=csv_all, file_name="Tam_Rapor.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Tüm Raporu İndir", data=csv_all, file_name="Tam_Rapor.csv", mime="text/csv")
         with col2:
             csv_clean = temiz_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("✅ TEMİZ LİSTEYİ İNDİR", data=csv_clean, file_name="Temiz_Liste.csv", mime="text/csv", use_container_width=True)
+            st.download_button("✅ TEMİZ LİSTEYİ İNDİR", data=csv_clean, file_name="Temiz_Liste.csv", mime="text/csv")
