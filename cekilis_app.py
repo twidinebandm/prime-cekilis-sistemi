@@ -61,16 +61,16 @@ def fetch_comments_via_api(post_link):
                     ig_accounts.append(page['instagram_business_account']['id'])
         
         if not ig_accounts:
-            return None, "Token'a bağlı hiçbir Instagram Business hesabı bulunamadı. Lütfen Meta Developer panelinden 'instagram_basic' iznini kontrol edin."
+            return None, "Token'a bağlı hiçbir Instagram Business hesabı bulunamadı. Lütfen Meta Developer panelinden yetkileri kontrol edin."
 
         target_media_id = None
         
-        # 3. DERİN TARAMA: Her hesapta 100'erli paketler halinde gönderiyi ara
+        # 3. ULTRA DERİN TARAMA: Her hesapta 100'erli paketler halinde gönderiyi ara (Limit artırıldı)
         for ig_account_id in ig_accounts:
             media_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media?fields=shortcode,id&limit=100&access_token={META_ACCESS_TOKEN}"
             
             page_count = 0
-            while media_url and not target_media_id and page_count < 5: # Son 500 postu tarar
+            while media_url and not target_media_id and page_count < 100: # Son 10.000 postu tarar (Eski/Sabitlenmiş gönderiler için)
                 m_res = requests.get(media_url).json()
                 if 'data' in m_res:
                     for item in m_res['data']:
@@ -81,7 +81,7 @@ def fetch_comments_via_api(post_link):
                 page_count += 1
                 
         if not target_media_id:
-            return None, f"Gönderi ({shortcode}) API'de bulunamadı. 1- Gönderi çok eski olabilir. 2- Token'ın bu hesabı görme yetkisi eksik olabilir."
+            return None, f"Gönderi ({shortcode}) API'de bulunamadı. Lütfen Token'ın turktelekomprime hesabına erişim izni olduğundan emin olun."
 
         # 4. Yorumları Çek
         all_comments = []
@@ -147,14 +147,15 @@ else:
     if st.button("🚀 Bilgileri Gönder (Denetimi Başlat)", type="primary"):
         st.divider()
         
-        with st.spinner("Meta Graph API bağlantısı kuruluyor ve yorumlar toplanıyor..."):
+        # Güncellenmiş Bekleme Yazısı
+        with st.spinner("Gönderi Meta API'de aranıyor ve yorumlar indiriliyor (Eski/Sabitlenmiş gönderiler için işlem 1-2 dakika sürebilir)..."):
             df_comm, api_status = fetch_comments_via_api(post_link)
             
         if df_comm is None:
             st.error(f"❌ Yorumlar çekilemedi! Hata Detayı: {api_status}")
             st.stop()
         else:
-            st.info(f"✅ Gönderi bulundu! {len(df_comm)} adet yorum başarıyla analiz edildi.")
+            st.info(f"✅ Gönderi başarıyla bulundu! {len(df_comm)} adet yorum sisteme aktarıldı.")
             
         progress_text = st.empty()
         progress_bar = st.progress(0)
