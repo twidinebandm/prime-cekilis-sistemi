@@ -5,12 +5,10 @@ import requests
 import time
 
 # --- OTOMATİZE EDİLMİŞ TEKNİK BİLGİLER ---
-# Bu bilgiler artık uygulamaya gömülü, kullanıcıya sorulmaz.
 META_ACCESS_TOKEN = "EAAYe5ygQkWgBRYbL9iiNuKi1grhBcfKAdqtxtP8uRHMik1e82yt31DJIqtBSh6PQZB8ncKLYMqfU4iCOHpTRW6IQFHkAUdbcrHZCeAcncNlCqpVLxU0gU6GEPShkPBlg5GgnZAcrSGg0rt8YWSEwFfUbZA34R8zfpw27JjUPzVzLMIfGviLFqvpD0zqBgvjAtlIpuFLCgqy1bfaHCeg5huze2IEbPAfO2ou4mtZAxKWNvfZBdrZAEC1"
-IG_ACCOUNT_ID = "6059371647"
 
-# Takip/Beğeni kontrolü için kullanılan Session ID (Son verdiğin güncel ID)
-INSTAGRAM_SESSION_ID = "6059371647%3AxKaA8ghWdqymPy%3A8%3AAYhvCQlBFVxwO3h3ZJpdRxP8Cr-QP4OQ2N4R1u1qug"
+# Takip/Beğeni kontrolü için kullanılan Session ID
+INSTAGRAM_SESSION_ID = "192295478%3AjzBzsgeIuBnZRM%3A2%3AAYh8VySB7nBet-2nviwjm5wIhLGzfpY4NjAOL7u2nPPe"
 
 st.set_page_config(page_title="Çekiliş Denetimi", layout="wide")
 
@@ -44,17 +42,40 @@ def verify_follow_and_like(username, post_url):
         return "⚠️ Bağlantı Hatası", "⚠️ Bağlantı Hatası"
 
 def fetch_comments_via_api(post_link):
-    """Meta Graph API üzerinden gönderiye ait tüm yorumları çeker."""
+    """Meta Token ile doğru Business ID'yi kendi bulup yorumları çeker."""
     try:
-        # Post Linkinden Shortcode'u ayıkla
+        ig_account_id = None
+        
+        # 1. Otomatik Business Account ID Tespiti
+        # Önce Sayfa Token'ı olma ihtimalini dener
+        me_url = f"https://graph.facebook.com/v19.0/me?fields=instagram_business_account&access_token={META_ACCESS_TOKEN}"
+        me_res = requests.get(me_url).json()
+        
+        if 'instagram_business_account' in me_res:
+            ig_account_id = me_res['instagram_business_account']['id']
+        else:
+            # Kullanıcı Token'ı ise bağlı sayfaları tarar
+            accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?fields=instagram_business_account&access_token={META_ACCESS_TOKEN}"
+            acc_res = requests.get(accounts_url).json()
+            
+            if 'data' in acc_res:
+                for page in acc_res['data']:
+                    if 'instagram_business_account' in page:
+                        ig_account_id = page['instagram_business_account']['id']
+                        break
+                        
+        if not ig_account_id:
+            return None, "Token'a bağlı gizli Instagram Business kimliği bulunamadı. İzinleri kontrol edin."
+
+        # 2. Post Linkinden Shortcode'u ayıkla
         shortcode = list(filter(None, post_link.split('/')))[-1]
         
-        # 1. Medya ID'sini bul
-        media_url = f"https://graph.facebook.com/v19.0/{IG_ACCOUNT_ID}/media?fields=shortcode,id&access_token={META_ACCESS_TOKEN}"
+        # 3. Bulunan Kimlik ile Medya ID'sini tespit et
+        media_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media?fields=shortcode,id&access_token={META_ACCESS_TOKEN}"
         media_response = requests.get(media_url).json()
         
         if 'error' in media_response:
-            return None, f"API Hatası: {media_response['error']['message']}"
+            return None, f"Medya Hatası: {media_response['error']['message']}"
             
         target_media_id = None
         for item in media_response.get('data', []):
@@ -65,18 +86,21 @@ def fetch_comments_via_api(post_link):
         if not target_media_id:
             return None, "Gönderi API üzerinde bulunamadı. Lütfen Linkin doğruluğunu kontrol edin."
             
-        # 2. Tüm yorumları çek
+        # 4. Tüm yorumları sayfa sayfa (pagination) çek
         comments_url = f"https://graph.facebook.com/v19.0/{target_media_id}/comments?fields=username,text&limit=100&access_token={META_ACCESS_TOKEN}"
         all_comments = []
         
         while comments_url:
             c_response = requests.get(comments_url).json()
+            if 'error' in c_response:
+                return None, f"Yorum Hatası: {c_response['error']['message']}"
+                
             all_comments.extend(c_response.get('data', []))
             comments_url = c_response.get('paging', {}).get('next', None)
             
         return pd.DataFrame(all_comments), "Başarılı"
     except Exception as e:
-        return None, f"Bağlantı Hatası: {str(e)}"
+        return None, f"Bağlantı/Sistem Hatası: {str(e)}"
 
 # --- ARAYÜZ (ADIM ADIM YAPI) ---
 st.title("⚖️ Çekiliş Denetimi (Hibrit & Otomatize)")
@@ -86,7 +110,6 @@ with st.sidebar:
     st.title("İşlem Adımları")
     st.divider()
     
-    # Adım 1
     st.header("1️⃣ Sonuç Listesi")
     u2_file = st.file_uploader("U2 Sonuç Listesini Yükleyin", type=['xlsx'])
     
@@ -97,7 +120,6 @@ with st.sidebar:
         st.success("✅ Sonuç Listesi Yüklendi")
         st.divider()
         
-        # Adım 2
         st.header("2️⃣ Başvuru Formu")
         form_file = st.file_uploader("Başvuru Formunu Yükleyin", type=['xlsx'])
         
@@ -105,7 +127,6 @@ with st.sidebar:
             st.success("✅ Başvuru Formu Yüklendi")
             st.divider()
             
-            # Adım 3
             st.header("3️⃣ Etkileşim Kontrolü")
             post_link = st.text_input("Beğeni Kontrolü İçin Post Linki", placeholder="https://instagram.com/p/...")
             if post_link:
@@ -119,7 +140,6 @@ elif not form_file:
 elif not post_link:
     st.info("💡 Son olarak beğeni kontrolü yapılacak **Post Linkini** girin ve klavyeden 'Enter' tuşuna basın.")
 else:
-    # Tüm adımlar tamamsa dosyaları oku
     df_u2 = pd.read_excel(u2_file, header=0) 
     df_form = pd.read_excel(form_file)
     
@@ -132,17 +152,15 @@ else:
     if st.button("🚀 Bilgileri Gönder (Denetimi Başlat)", type="primary"):
         st.divider()
         
-        # Meta API ile yorumları çek
-        with st.spinner("Meta Graph API üzerinden yorumlar toplanıyor..."):
+        with st.spinner("Meta Graph API bağlantısı kuruluyor ve yorumlar toplanıyor..."):
             df_comm, api_status = fetch_comments_via_api(post_link)
             
         if df_comm is None:
-            st.error(f"❌ Yorumlar çekilemedi! Hata: {api_status}")
+            st.error(f"❌ Yorumlar çekilemedi! Hata Detayı: {api_status}")
             st.stop()
         else:
             st.info(f"✅ {len(df_comm)} adet yorum başarıyla analiz edildi.")
             
-        # Denetim döngüsü
         progress_text = st.empty()
         progress_bar = st.progress(0)
         timer_text = st.empty() 
@@ -155,7 +173,6 @@ else:
             hediye_tipi = str(row.iloc[0]).strip()
             u2_user = str(row.iloc[3]).lower().strip() if not pd.isna(row.iloc[3]) else "nan"
             
-            # Filtreleme: Gereksiz satırları ve başlıkları atla
             ignore_users = ["boş satır", "nan", "instagram kullanıcı adı", "instagram kullanici adi"]
             ignore_durum = ["nan", "boş satır", "", "none"]
             
@@ -168,9 +185,9 @@ else:
             # 1. FORM KONTROLÜ
             form_durumu = "Olumlu ✅" if u2_user in form_users else "Olumsuz 🚫 (Yok / Uyuşmuyor)"
             
-            # 2. 3 ETİKET KONTROLÜ (API verisi üzerinden)
+            # 2. 3 ETİKET KONTROLÜ
             etiket_durumu = "Olumsuz 🚫 (Yorum Yok)"
-            if not df_comm.empty:
+            if not df_comm.empty and 'username' in df_comm.columns:
                 user_comm = df_comm[df_comm['username'].str.lower().str.strip() == u2_user]
                 if not user_comm.empty:
                     max_mentions = 0
