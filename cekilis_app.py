@@ -222,3 +222,4 @@ else:
                 st.session_state.result_df = None
                 st.session_state.temiz_df = None
                 st.rerun()
+
